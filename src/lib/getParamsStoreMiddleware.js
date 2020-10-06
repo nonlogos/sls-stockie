@@ -21,24 +21,3 @@ export default (handler, config) => {
 
   return middy(handler).use(ssm(params));
 };
-
-// import AWS from 'aws-sdk';
-// async function getParamsStoreValue(names = [], withDecrypt = true) {
-//   try {
-//     if (!names || !names.length) {
-//       throw new Error('an array of names is required');
-//     }
-//     const ssm = new AWS.SSM();
-
-//     const params = {
-//       Names: names,
-//       WithDecryption: true,
-//     };
-//     return await ssm.getParameters(params).promise();
-//   } catch (error) {
-//     console.error(`getParamsStoreVaue error: ${error}`);
-//     throw error;
-//   }
-// }
-
-// export default getParamsStoreValue;
