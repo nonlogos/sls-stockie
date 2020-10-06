@@ -1,0 +1,11 @@
+ApiKeysIAM:
+  Effect: Allow
+  Action:
+    - ssm:GetParameter
+    - kms:Decrypt
+  Resource:
+    - arn:aws:ssm:#{AWS::Region}:#{AWS::AccountId}:parameter/Stockie/envs/*
+    - arn:aws:kms:#{AWS::Region}:#{AWS::AccountId}:key/14451bf8-b5ae-4862-9104-abdbcedd5c7f
+    - arn:aws:kms:#{AWS::Region}:#{AWS::AccountId}:key/3709567f-b8af-4ef6-867a-989f42b19658
+    - arn:aws:kms:#{AWS::Region}:#{AWS::AccountId}:key/77695dd2-5545-4e89-a34d-825c56d034af
+    - arn:aws:kms:#{AWS::Region}:#{AWS::AccountId}:key/c326497b-2473-4dff-a7e3-bbd8dfdef591

@@ -1,0 +1,36 @@
+service:
+  name: stockie
+
+plugins:
+  - serverless-bundle
+  - serverless-pseudo-parameters
+provider:
+  name: aws
+  runtime: nodejs12.x
+  memorySize: 256
+  stage: ${opt:stage, 'dev'}
+  region: us-east-2
+  iamRoleStatements:
+    - ${file(iam/ApiKeysIAM.yml):ApiKeysIAM}
+  environment:
+    ALPACA_LIVE_API_PATH: ${self:custom.paramsPath.apiKey}
+    ALPACA_LIVE_SECRET_PATH: ${self:custom.paramsPath.secretKey}
+    ALPACA_PAPER_API_KEY: ${ssm:/Stockie/envs/ALPACA_PAPER_API_KEY~true}
+    ALPACA_PAPER_SECRET_KEY: ${ssm:/Stockie/envs/ALPACA_PAPER_SECRET_KEY~true}
+    ALPACA_PAPER_API_ENDPOINT: https://paper-api.alpaca.markets
+    ALPACA_LIVE_API_ENDPOINT: https://api.alpaca.markets
+    POLYGON_LIVE_API_ENDPOINT: https://api.polygon.io
+    STAGE: ${self:provider.stage}
+functions:
+  getMarketStatus:
+    handler: src/handlers/getMarketStatus.handler
+    iamRoleStatements:
+      - ${file(iam/ApiKeysIAM.yml):ApiKeysIAM}
+    events:
+      - http:
+          method: GET
+          path: /getMarketStatus
+custom:
+  paramsPath:
+    apiKey: /Stockie/envs/ALPACA_LIVE_API_KEY
+    secretKey: /Stockie/envs/ALPACA_LIVE_SECRET_KEY
