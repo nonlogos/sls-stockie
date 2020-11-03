@@ -4,6 +4,7 @@ service:
 plugins:
   - serverless-bundle
   - serverless-pseudo-parameters
+  - serverless-step-functions
 provider:
   name: aws
   runtime: nodejs12.x
@@ -12,25 +13,203 @@ provider:
   region: us-east-2
   iamRoleStatements:
     - ${file(iam/ApiKeysIAM.yml):ApiKeysIAM}
-  environment:
-    ALPACA_LIVE_API_PATH: ${self:custom.paramsPath.apiKey}
-    ALPACA_LIVE_SECRET_PATH: ${self:custom.paramsPath.secretKey}
-    ALPACA_PAPER_API_KEY: ${ssm:/Stockie/envs/ALPACA_PAPER_API_KEY~true}
-    ALPACA_PAPER_SECRET_KEY: ${ssm:/Stockie/envs/ALPACA_PAPER_SECRET_KEY~true}
-    ALPACA_PAPER_API_ENDPOINT: https://paper-api.alpaca.markets
-    ALPACA_LIVE_API_ENDPOINT: https://api.alpaca.markets
-    POLYGON_LIVE_API_ENDPOINT: https://api.polygon.io
-    STAGE: ${self:provider.stage}
+    - Effect: Allow
+      Action:
+        - dynamodb:Query
+        - dynamodb:Scan
+        - dynamodb:GetItem
+        - dynamodb:PutItem
+        - dynamodb:UpdateItem
+      Resource:
+        - arn:aws:dynamodb:#{AWS::Region}:#{AWS::AccountId}:table/stockieBotOrders-${self:provider.stage}
+    - Effect: Allow
+      Action:
+        - lambda:InvokeFunction
+      Resource: '*'
+  environment: ${file(environment/EnvVars.yml):EnvVars}
 functions:
   getMarketStatus:
     handler: src/handlers/getMarketStatus.handler
-    iamRoleStatements:
-      - ${file(iam/ApiKeysIAM.yml):ApiKeysIAM}
-    events:
-      - http:
-          method: GET
-          path: /getMarketStatus
+  getDailyStockList:
+    handler: src/handlers/getDailyStockList.handler
+  getMACDStockList:
+    handler: src/handlers/getMACDStockList.handler
+  currentPerformanceCheck:
+    handler: src/handlers/currentPerformanceCheck.handler
+  calculateOrderAmount:
+    handler: src/handlers/calculateOrderAmount.handler
+  createNewOrder:
+    handler: src/handlers/createNewOrder.handler
+resources:
+  Resources:
+    stockieBotOrdersTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: stockieBotOrders-${self:provider.stage}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+    StepsLogs:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: /aws/StockieAutoOrderFlow/${self:service}-StepsLogs
+stepFunctions:
+  validate: true
+  stateMachines:
+    StockieAutoOrderFlow:
+      role: arn:aws:iam::#{AWS::AccountId}:role/StepFunctionsLambdaRole
+      events:
+        - schedule: cron(30 13 ? * MON,TUE,WED,THU,FRI *)
+      name: StockieAutoOrderFlow-${self:provider.stage}
+      tracingConfig:
+        enabled: true
+      loggingConfig:
+        level: ERROR
+        includeExecutionData: true
+        destinations:
+          - Fn::GetAtt: [StepsLogs, Arn]
+      alarms:
+        topics:
+          ok: arn:aws:sns:#{AWS::Region}:#{AWS::AccountId}:NotifyMe
+          alarm: arn:aws:sns:#{AWS::Region}:#{AWS::AccountId}:NotifyMe
+          insufficientData: arn:aws:sns:#{AWS::Region}:#{AWS::AccountId}:NotifyMe
+        metrics:
+          - executionsTimedOut
+          - executionsFailed
+          - executionsAborted
+          - executionThrottled
+          - executionsSucceeded
+        treatMissingData: missing
+      definition:
+        Comment: 'A Hello World example of the Amazon States Language using an AWS Lambda Functions'
+        StartAt: RunMarketStatus
+        States:
+          RunMarketStatus:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [getMarketStatus, Arn]
+            Next: IsMarketOpen
+          IsMarketOpen:
+            Type: Choice
+            Choices:
+              - Variable: '$.is_open'
+                BooleanEquals: true
+                Next: GetTodaysStocks
+              - And:
+                  - Variable: '$.stage'
+                    StringEquals: 'prod'
+                  - Variable: '$.is_open'
+                    BooleanEquals: false
+                Next: 'No-op'
+            Default: GetTodaysStocks
+          GetTodaysStocks:
+            Type: Task
+            Parameters:
+              minPrice: 2
+              maxPrice: 13
+              increasePercentage: 3.5
+            Resource:
+              Fn::GetAtt: [getDailyStockList, Arn]
+            Retry: ${file(stateMachineControls/Retry.yml):RetryFromErrors}
+            Next: AvailableStocks
+          AvailableStocks:
+            Type: Choice
+            Choices:
+              - Variable: '$.tickers'
+                IsNull: false
+                Next: MACDCheck
+              - Variable: '$.tickers'
+                IsNull: true
+                Next: 'No-op'
+          MACDCheck:
+            Type: Map
+            ItemsPath: '$.tickers'
+            Iterator:
+              StartAt: GetMACDStockList
+              States:
+                GetMACDStockList:
+                  Type: Task
+                  ResultPath: '$.result'
+                  Resource:
+                    Fn::GetAtt: [getMACDStockList, Arn]
+                  Retry: ${file(stateMachineControls/Retry.yml):RetryFromErrors}
+                  Catch:
+                    - ErrorEquals: ['States.ALL']
+                      Next: GetMACDStockListErrorFallback
+                  Next: DidItPassMACDCheck
+                GetMACDStockListErrorFallback:
+                  Type: Pass
+                  Result: null
+                  Next: DidItPassMACDCheck
+                DidItPassMACDCheck:
+                  Type: Choice
+                  Choices:
+                    - Variable: '$.result'
+                      IsNull: true
+                      Next: MACDCheckFallback
+                    - Variable: '$.result'
+                      IsNull: false
+                      Next: Wait15Mins
+                  Default: Wait15Mins
+                MACDCheckFallback:
+                  Type: Pass
+                  End: true
+                Wait15Mins:
+                  Type: Wait
+                  Seconds: 60
+                  Next: CurrentPerformanceCheck
+                CurrentPerformanceCheck:
+                  Type: Task
+                  Resource:
+                    Fn::GetAtt: [currentPerformanceCheck, Arn]
+                  Retry: ${file(stateMachineControls/Retry.yml):RetryFromErrors}
+                  End: true
+            Next: CalculateOrderAmount
+          CalculateOrderAmount:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [calculateOrderAmount, Arn]
+            Retry: ${file(stateMachineControls/Retry.yml):RetryFromErrors}
+            Next: AreThereOrdersToPlace
+          AreThereOrdersToPlace:
+            Type: Choice
+            Choices:
+              - Variable: '$.sharesToBuy'
+                IsNull: false
+                Next: PlaceOrders
+              - Variable: '$.sharesToBuy'
+                IsNull: true
+                Next: 'No-op'
+          PlaceOrders:
+            Type: Map
+            ItemsPath: '$.sharesToBuy'
+            Iterator:
+              StartAt: CreateNewOrders
+              States:
+                CreateNewOrders:
+                  Type: Task
+                  Resource:
+                    Fn::GetAtt: [createNewOrder, Arn]
+                  Retry: ${file(stateMachineControls/Retry.yml):RetryFromErrors}
+                  End: true
+            End: true
+          No-op:
+            Type: Pass
+            End: true
 custom:
+  serverless-iam-roles-per-function:
+    defaultInherit: true
   paramsPath:
     apiKey: /Stockie/envs/ALPACA_LIVE_API_KEY
     secretKey: /Stockie/envs/ALPACA_LIVE_SECRET_KEY
+  options:
+    IncreasePercentage: 3.5
+    min_share_price: 2
+    max_share_price: 13
+    min_last_dv: 500000
+    risk: 0.001
+    stopPerc: 0.95

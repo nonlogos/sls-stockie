@@ -1,0 +1,15 @@
+EnvVars:
+  ALPACA_LIVE_API_PATH: ${self:custom.paramsPath.apiKey}
+  ALPACA_LIVE_SECRET_PATH: ${self:custom.paramsPath.secretKey}
+  ALPACA_PAPER_API_KEY: ${ssm:/Stockie/envs/ALPACA_PAPER_API_KEY~true}
+  ALPACA_PAPER_SECRET_KEY: ${ssm:/Stockie/envs/ALPACA_PAPER_SECRET_KEY~true}
+  ALPACA_PAPER_API_ENDPOINT: https://paper-api.alpaca.markets
+  ALPACA_LIVE_API_ENDPOINT: https://api.alpaca.markets
+  POLYGON_LIVE_API_ENDPOINT: https://api.polygon.io
+  STAGE: ${self:provider.stage}
+  INCREASE_PERCENTAGE: ${self:custom.options.IncreasePercentage}
+  MIN_SHARE_PRICE: ${self:custom.options.min_share_price}
+  MAX_SHARE_PRICE: ${self:custom.options.max_share_price}
+  MIN_LAST_DV: ${self:custom.options.min_last_dv}
+  RISK: ${self:custom.options.risk}
+  DEFAULT_STOP_PERC: ${self:custom.options.stopPerc}

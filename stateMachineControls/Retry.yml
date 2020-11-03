@@ -1,0 +1,6 @@
+RetryFromErrors:
+  - ErrorEquals:
+      - State.TaskFailed
+      - State.Timeout
+    IntervalSeconds: 3
+    MaxAttempts: 3
