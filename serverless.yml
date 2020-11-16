@@ -32,14 +32,16 @@ functions:
     handler: src/handlers/getMarketStatus.handler
   getDailyStockList:
     handler: src/handlers/getDailyStockList.handler
-  getMACDStockList:
-    handler: src/handlers/getMACDStockList.handler
+  stockToBuy:
+    handler: src/handlers/stockToBuy.handler
   currentPerformanceCheck:
     handler: src/handlers/currentPerformanceCheck.handler
   calculateOrderAmount:
     handler: src/handlers/calculateOrderAmount.handler
   createNewOrder:
     handler: src/handlers/createNewOrder.handler
+  checkStockPositions:
+    handler: src/handlers/checkStockPositions.handler
 resources:
   Resources:
     stockieBotOrdersTable:
@@ -60,146 +62,8 @@ resources:
 stepFunctions:
   validate: true
   stateMachines:
-    StockieAutoOrderFlow:
-      role: arn:aws:iam::#{AWS::AccountId}:role/StepFunctionsLambdaRole
-      events:
-        - schedule: cron(30 13 ? * MON,TUE,WED,THU,FRI *)
-      name: StockieAutoOrderFlow-${self:provider.stage}
-      tracingConfig:
-        enabled: true
-      loggingConfig:
-        level: ERROR
-        includeExecutionData: true
-        destinations:
-          - Fn::GetAtt: [StepsLogs, Arn]
-      alarms:
-        topics:
-          ok: arn:aws:sns:#{AWS::Region}:#{AWS::AccountId}:NotifyMe
-          alarm: arn:aws:sns:#{AWS::Region}:#{AWS::AccountId}:NotifyMe
-          insufficientData: arn:aws:sns:#{AWS::Region}:#{AWS::AccountId}:NotifyMe
-        metrics:
-          - executionsTimedOut
-          - executionsFailed
-          - executionsAborted
-          - executionThrottled
-          - executionsSucceeded
-        treatMissingData: missing
-      definition:
-        Comment: 'A Hello World example of the Amazon States Language using an AWS Lambda Functions'
-        StartAt: RunMarketStatus
-        States:
-          RunMarketStatus:
-            Type: Task
-            Resource:
-              Fn::GetAtt: [getMarketStatus, Arn]
-            Next: IsMarketOpen
-          IsMarketOpen:
-            Type: Choice
-            Choices:
-              - Variable: '$.is_open'
-                BooleanEquals: true
-                Next: GetTodaysStocks
-              - And:
-                  - Variable: '$.stage'
-                    StringEquals: 'prod'
-                  - Variable: '$.is_open'
-                    BooleanEquals: false
-                Next: 'No-op'
-            Default: GetTodaysStocks
-          GetTodaysStocks:
-            Type: Task
-            Parameters:
-              minPrice: 2
-              maxPrice: 13
-              increasePercentage: 3.5
-            Resource:
-              Fn::GetAtt: [getDailyStockList, Arn]
-            Retry: ${file(stateMachineControls/Retry.yml):RetryFromErrors}
-            Next: AvailableStocks
-          AvailableStocks:
-            Type: Choice
-            Choices:
-              - Variable: '$.tickers'
-                IsNull: false
-                Next: MACDCheck
-              - Variable: '$.tickers'
-                IsNull: true
-                Next: 'No-op'
-          MACDCheck:
-            Type: Map
-            ItemsPath: '$.tickers'
-            Iterator:
-              StartAt: GetMACDStockList
-              States:
-                GetMACDStockList:
-                  Type: Task
-                  ResultPath: '$.result'
-                  Resource:
-                    Fn::GetAtt: [getMACDStockList, Arn]
-                  Retry: ${file(stateMachineControls/Retry.yml):RetryFromErrors}
-                  Catch:
-                    - ErrorEquals: ['States.ALL']
-                      Next: GetMACDStockListErrorFallback
-                  Next: DidItPassMACDCheck
-                GetMACDStockListErrorFallback:
-                  Type: Pass
-                  Result: null
-                  Next: DidItPassMACDCheck
-                DidItPassMACDCheck:
-                  Type: Choice
-                  Choices:
-                    - Variable: '$.result'
-                      IsNull: true
-                      Next: MACDCheckFallback
-                    - Variable: '$.result'
-                      IsNull: false
-                      Next: Wait15Mins
-                  Default: Wait15Mins
-                MACDCheckFallback:
-                  Type: Pass
-                  End: true
-                Wait15Mins:
-                  Type: Wait
-                  Seconds: 60
-                  Next: CurrentPerformanceCheck
-                CurrentPerformanceCheck:
-                  Type: Task
-                  Resource:
-                    Fn::GetAtt: [currentPerformanceCheck, Arn]
-                  Retry: ${file(stateMachineControls/Retry.yml):RetryFromErrors}
-                  End: true
-            Next: CalculateOrderAmount
-          CalculateOrderAmount:
-            Type: Task
-            Resource:
-              Fn::GetAtt: [calculateOrderAmount, Arn]
-            Retry: ${file(stateMachineControls/Retry.yml):RetryFromErrors}
-            Next: AreThereOrdersToPlace
-          AreThereOrdersToPlace:
-            Type: Choice
-            Choices:
-              - Variable: '$.sharesToBuy'
-                IsNull: false
-                Next: PlaceOrders
-              - Variable: '$.sharesToBuy'
-                IsNull: true
-                Next: 'No-op'
-          PlaceOrders:
-            Type: Map
-            ItemsPath: '$.sharesToBuy'
-            Iterator:
-              StartAt: CreateNewOrders
-              States:
-                CreateNewOrders:
-                  Type: Task
-                  Resource:
-                    Fn::GetAtt: [createNewOrder, Arn]
-                  Retry: ${file(stateMachineControls/Retry.yml):RetryFromErrors}
-                  End: true
-            End: true
-          No-op:
-            Type: Pass
-            End: true
+    StockieAutoOrderFlow: ${file(stateMachineControls/stockieAutoOrderFlow.yml)}
+    StockieDayTradeFlow: ${file(stateMachineControls/stockieDayTradeFlow.yml)}
 custom:
   serverless-iam-roles-per-function:
     defaultInherit: true
@@ -207,7 +71,7 @@ custom:
     apiKey: /Stockie/envs/ALPACA_LIVE_API_KEY
     secretKey: /Stockie/envs/ALPACA_LIVE_SECRET_KEY
   options:
-    IncreasePercentage: 3.5
+    IncreasePercentage: 4
     min_share_price: 2
     max_share_price: 13
     min_last_dv: 500000

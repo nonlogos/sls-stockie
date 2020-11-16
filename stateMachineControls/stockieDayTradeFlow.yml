@@ -1,0 +1,61 @@
+role: arn:aws:iam::#{AWS::AccountId}:role/StepFunctionsLambdaRole
+events:
+  - schedule:
+      rate: cron(0/3 15-20 ? * MON-FRI *)
+      enabled: true
+name: StockieDayTradeFlow-${self:provider.stage}
+tracingConfig:
+  enabled: true
+loggingConfig:
+  level: ERROR
+  includeExecutionData: true
+  destinations:
+    - Fn::GetAtt: [StepsLogs, Arn]
+alarms:
+  topics:
+    alarm: arn:aws:sns:#{AWS::Region}:#{AWS::AccountId}:StockieBotTopic
+  metrics:
+    - executionsFailed
+    - executionsSucceeded
+  treatMissingData: missing
+definition:
+  Comment: 'Stockiebot auto daytrading flow'
+  StartAt: CheckPositions
+  States:
+    CheckPositions:
+      Type: Task
+      Resource:
+        Fn::GetAtt: [checkStockPositions, Arn]
+      Next: AreThereOrdersToPlace
+    AreThereOrdersToPlace:
+      Type: Choice
+      Choices:
+        - Variable: '$.stocksToSell'
+          IsNull: false
+          Next: PlaceOrders
+        - Variable: '$.stocksToSell'
+          IsNull: true
+          Next: 'No-op'
+    PlaceOrders:
+      Type: Map
+      ItemsPath: '$.stocksToSell'
+      Iterator:
+        StartAt: CreateNewOrders
+        States:
+          CreateNewOrders:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [createNewOrder, Arn]
+            Retry: ${file(stateMachineControls/Retry.yml):RetryFromErrors}
+            Catch:
+              - ErrorEquals: ['States.ALL']
+                Next: CatchAllFallback
+            End: true
+          CatchAllFallback:
+            Type: Pass
+            Result: 'This is a fallback from a reserved error code'
+            End: true
+      End: true
+    No-op:
+      Type: Pass
+      End: true

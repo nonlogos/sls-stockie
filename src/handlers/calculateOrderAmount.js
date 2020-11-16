@@ -9,8 +9,9 @@ async function calculateOrderAmount(event, context) {
     if (!Array.isArray(list) || list.length < 1) { 
       return null;
     }
+    // filter out the stocks that failed previous tests
     const stockList = list
-      .filter(stock => stock !== null)
+      .filter(stock => (stock.ticker && stock.lastBar))
       .slice(0, 10);
 
     if (stockList.length < 1) { 
@@ -33,7 +34,7 @@ async function calculateOrderAmount(event, context) {
 
     const sharesToBuyPerStock = stockList.map(stock => {
       const maxOrderAmount = totalInvestingAmount / stockList.length;
-      const currentValue = stock.ticker.lastTrade.p;
+      const currentValue = stock.lastBar.c;
       const defaultStop = currentValue * DEFAULT_STOP_PERC;
       const estimatedShares = Math.floor(totalInvestingAmount * RISK * defaultStop);
       const orderAmount = estimatedShares * currentValue;
@@ -42,8 +43,8 @@ async function calculateOrderAmount(event, context) {
         sharesToBuy = Math.floor(maxOrderAmount / currentValue);
       }
       const percOfTotalInvestment = (sharesToBuy * currentValue) / totalInvestingAmount * 100;
-      console.info('stock', stock.ticker.ticker, sharesToBuy);
-      return { ticker: stock.ticker.ticker, shares: sharesToBuy, price: currentValue, percOfTotalInvestment  };
+      console.info('stock', stock.ticker, sharesToBuy);
+      return { ticker: stock.ticker, shares: sharesToBuy, price: currentValue, percOfTotalInvestment, side: 'buy' };
     })
     
     return { sharesToBuy: sharesToBuyPerStock };

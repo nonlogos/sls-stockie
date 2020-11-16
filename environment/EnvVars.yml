@@ -5,6 +5,7 @@ EnvVars:
   ALPACA_PAPER_SECRET_KEY: ${ssm:/Stockie/envs/ALPACA_PAPER_SECRET_KEY~true}
   ALPACA_PAPER_API_ENDPOINT: https://paper-api.alpaca.markets
   ALPACA_LIVE_API_ENDPOINT: https://api.alpaca.markets
+  ALPACA_DATA_API_ENDPOINT: https://data.alpaca.markets
   POLYGON_LIVE_API_ENDPOINT: https://api.polygon.io
   STAGE: ${self:provider.stage}
   INCREASE_PERCENTAGE: ${self:custom.options.IncreasePercentage}

@@ -2,5 +2,10 @@ RetryFromErrors:
   - ErrorEquals:
       - State.TaskFailed
       - State.Timeout
+      - State.ALL
+      - Lambda.ServiceException
+      - Lambda.AWSLambdaException
+      - Lambda.SdkClientException
     IntervalSeconds: 3
     MaxAttempts: 3
+    BackoffRate: 2
